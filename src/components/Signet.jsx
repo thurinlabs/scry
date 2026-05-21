@@ -1,0 +1,795 @@
+import { useState, useCallback, useMemo } from 'react'
+import { useAccount, useSignMessage, useWriteContract, useReadContract, useReadContracts } from 'wagmi'
+import { ConnectButton } from '@rainbow-me/rainbowkit'
+import { mainnet } from 'wagmi/chains'
+import * as openpgp from 'openpgp'
+import { REGISTRY_ADDRESS, REGISTRY_ABI } from '../wagmiConfig'
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function shortAddr(addr) {
+  return addr ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : ''
+}
+
+function copyToClipboard(text, e) {
+  navigator.clipboard.writeText(text)
+  if (e?.target) {
+    const btn = e.target
+    const original = btn.textContent
+    btn.textContent = 'copied!'
+    btn.classList.add('copied')
+    setTimeout(() => {
+      btn.textContent = original
+      btn.classList.remove('copied')
+    }, 1200)
+  }
+}
+
+// Extract a 40-char hex fingerprint from GPG output or raw input
+function extractFingerprint(input) {
+  // Strip all whitespace and see if there's a 40-char hex string hiding in there
+  const hex = input.replace(/\s/g, '').match(/[0-9A-Fa-f]{40}/)
+  return hex ? hex[0].toUpperCase() : null
+}
+
+// The message the wallet signs — must match exactly what you put in the GPG step
+function ethPayload(fingerprint) {
+  return `I control the GPG key with fingerprint: ${fingerprint.toUpperCase()}`
+}
+
+// The message GPG signs — must match exactly
+function gpgPayload(address) {
+  return `I control the Ethereum address: ${address.toLowerCase()}`
+}
+
+// ─── Step 1: Connect Wallet ──────────────────────────────────────────────────
+
+function StepConnect({ active, done }) {
+  const { isConnected } = useAccount()
+
+  return (
+    <div className={`step ${active ? 'active' : ''} ${done ? 'done' : ''}`}>
+      <div className="step-header">
+        <span className={`step-num ${active ? 'active-num' : ''}`}>01 //</span>
+        <span className="step-title">Connect Wallet</span>
+        {done && <span className="step-badge">✓ complete</span>}
+      </div>
+
+      {!isConnected && (
+        <p className="helper">Connect your wallet to get started. Your address will be sealed into the identity claim. Already have one? <a href="/" rel="noopener noreferrer">Look it up</a>.</p>
+      )}
+
+      <ConnectButton showBalance={false} />
+    </div>
+  )
+}
+
+// ─── Step 2: Sign Fingerprint with ETH Wallet ────────────────────────────────
+
+function StepSignEth({ active, done, address, onSigned, ethSig }) {
+  const [fingerprint, setFingerprint] = useState('')
+  const [status, setStatus] = useState(null)
+  const { signMessage, isPending } = useSignMessage()
+
+
+  const detected = fingerprint.trim() ? extractFingerprint(fingerprint) : null
+
+  const handleSign = useCallback(() => {
+    if (!detected) {
+      setStatus({ type: 'err', msg: 'Could not find a 40-character fingerprint in your input.' })
+      return
+    }
+
+    const fp = detected
+
+    const message = ethPayload(fp)
+    setStatus({ type: 'info', msg: `Signing: "${message}"` })
+
+    signMessage(
+      { message },
+      {
+        onSuccess(sig) {
+          setStatus({ type: 'ok', msg: 'Signature obtained.' })
+          onSigned({ fingerprint: fp, ethSig: sig, message })
+        },
+        onError(err) {
+          setStatus({ type: 'err', msg: err.shortMessage || err.message })
+        },
+      }
+    )
+  }, [fingerprint, signMessage, onSigned])
+
+  return (
+    <div className={`step ${active ? 'active' : ''} ${done ? 'done' : ''}`}>
+      <div className="step-header">
+        <span className={`step-num ${active ? 'active-num' : ''}`}>02 //</span>
+        <span className="step-title">Sign Your GPG Fingerprint</span>
+        {done && <span className="step-badge">✓ complete</span>}
+      </div>
+
+      {active && (
+        <div className="fade-in">
+          <p className="helper">
+            Run <code>gpg --fingerprint</code> and paste the output below. We'll find the fingerprint automatically.<br/>Don't have a PGP key? <a href="https://docs.thurin.id/#/scry/getting-started" target="_blank" rel="noopener noreferrer">Follow the getting started guide</a>.
+          </p>
+
+          <div className="command-block">
+            <span className="prompt">$ </span>
+            gpg --fingerprint your@email.com
+          </div>
+          <button className="btn btn-sm" onClick={(e) => copyToClipboard('gpg --fingerprint your@email.com', e)} style={{ marginTop: 8, marginBottom: 16 }}>
+            copy command
+          </button>
+
+          <textarea
+            className="pgp-input"
+            style={{ minHeight: 100 }}
+            placeholder={`pub   ed25519 2024-11-23 [SC]\n      03E5 3D80 7CE3 8C13 0ED4  2ECE CD3D 0D7F 0C9E 5FB8\nuid           [ultimate] You <you@email.com>\nsub   cv25519 2024-11-23 [E]`}
+            value={fingerprint}
+            onChange={e => setFingerprint(e.target.value)}
+            spellCheck={false}
+          />
+
+          {detected && (
+            <div className="mono-box fade-in" style={{ marginTop: 12, marginBottom: 16 }}>
+              <div className="label">detected fingerprint</div>
+              <div className="value">{detected}</div>
+            </div>
+          )}
+
+          {fingerprint.trim() && !detected && (
+            <div className="status err" style={{ marginTop: 12, marginBottom: 16 }}>
+              No 40-character fingerprint found in your input.
+            </div>
+          )}
+
+          <button className="btn btn-primary" onClick={handleSign} disabled={isPending || !detected}>
+            {isPending ? 'Check Wallet…' : 'Sign with Wallet'}
+          </button>
+
+          {status && <div className={`status ${status.type}`}>{status.msg}</div>}
+
+          {ethSig && (
+            <div className="mono-box fade-in" style={{ marginTop: 16 }}>
+              <div className="label">eth signature</div>
+              <div className="value" style={{ wordBreak: 'break-all' }}>{ethSig}</div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {done && !active && (
+        <div className="mono-box">
+          <div className="label">eth signature (truncated)</div>
+          <div className="value">{ethSig?.slice(0, 40)}…</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Step 3: GPG Sign ETH Address ────────────────────────────────────────────
+
+function StepSignGpg({ active, done, address, expectedFingerprint, onVerified, pgpSig, setPgpSig }) {
+  const [status, setStatus] = useState(null)
+  const [isVerifying, setIsVerifying] = useState(false)
+  const [needsManualKey, setNeedsManualKey] = useState(false)
+  const [manualPubKey, setManualPubKey] = useState('')
+  const [pendingMessage, setPendingMessage] = useState(null) // stash parsed message for manual key flow
+
+  const command = address && expectedFingerprint
+    ? `echo "${gpgPayload(address)}" | gpg --clearsign --armor -u ${expectedFingerprint}`
+    : address
+    ? `echo "${gpgPayload(address)}" | gpg --clearsign --armor`
+    : `echo "connect wallet first" | gpg --clearsign --armor`
+
+  const exportCommand = expectedFingerprint
+    ? `gpg --armor --export ${expectedFingerprint}`
+    : `gpg --armor --export you@email.com`
+
+  // Verify signature against a public key (shared by both flows)
+  const verifySig = useCallback(async (message, publicKey, signedText, keyId) => {
+    const verificationResult = await openpgp.verify({
+      message,
+      verificationKeys: publicKey,
+    })
+
+    const { verified } = verificationResult.signatures[0]
+    await verified // throws if invalid
+
+    const fingerprint = publicKey.getFingerprint().toUpperCase()
+
+    // Verify the signing key matches the fingerprint from Step 2
+    if (expectedFingerprint && fingerprint !== expectedFingerprint.toUpperCase()) {
+      setStatus({
+        type: 'err',
+        msg: `Key mismatch: you signed with key ${fingerprint.slice(0, 8)}... but Step 2 fingerprint is ${expectedFingerprint.slice(0, 8)}... — sign with the correct key.`
+      })
+      return
+    }
+
+    const armoredPublicKey = publicKey.armor()
+
+    // Extract rich metadata from the key
+    const primaryUser = await publicKey.getPrimaryUser()
+    const userIDs = publicKey.users.map(u => u.userID?.userID).filter(Boolean)
+    const keyAlgo = publicKey.keyPacket.algorithm
+    const keyBits = publicKey.keyPacket.getBitSize?.() ?? null
+    const createdAt = publicKey.keyPacket.created?.toISOString() ?? null
+    const expirationTime = await publicKey.getExpirationTime()
+    const expiresAt = expirationTime && expirationTime !== Infinity
+      ? new Date(expirationTime).toISOString() : null
+    const subkeyCount = publicKey.subkeys?.length ?? 0
+
+    setStatus({ type: 'ok', msg: `✓ Valid signature from key ${fingerprint}` })
+    onVerified({
+      pgpSig: pgpSig.trim(),
+      signedText,
+      keyId,
+      fingerprint,
+      armoredPublicKey,
+      pgpMeta: {
+        userIDs,
+        algorithm: keyAlgo,
+        bits: keyBits,
+        createdAt,
+        expiresAt,
+        subkeys: subkeyCount,
+      },
+    })
+  }, [pgpSig, onVerified, expectedFingerprint])
+
+  // Main verify: try keyserver first, fall back to manual paste
+  const handleVerify = useCallback(async () => {
+    if (!pgpSig.trim()) {
+      setStatus({ type: 'err', msg: 'Paste your PGP signed message above.' })
+      return
+    }
+
+    setIsVerifying(true)
+    setNeedsManualKey(false)
+    setStatus({ type: 'info', msg: 'Verifying PGP signature…' })
+
+    try {
+      const message = await openpgp.readCleartextMessage({ cleartextMessage: pgpSig.trim() })
+
+      const signedText = message.getText().trim()
+      const expected = gpgPayload(address)
+
+      if (!signedText.toLowerCase().includes(address.toLowerCase())) {
+        setStatus({ type: 'err', msg: `Signed text doesn't contain your address. Expected: "${expected}"` })
+        setIsVerifying(false)
+        return
+      }
+
+      const sigPackets = message.signature.packets
+      if (!sigPackets || sigPackets.length === 0) {
+        setStatus({ type: 'err', msg: 'No signature packet found in PGP message.' })
+        setIsVerifying(false)
+        return
+      }
+
+      const keyId = sigPackets[0].issuerKeyID?.toHex()?.toUpperCase()
+      setStatus({ type: 'info', msg: `Fetching public key ${keyId} from keys.openpgp.org…` })
+
+      try {
+        const resp = await fetch(`https://keys.openpgp.org/vks/v1/by-keyid/${keyId}`)
+        if (!resp.ok) throw new Error('Key not found on keyserver')
+        const armored = await resp.text()
+        const publicKey = await openpgp.readKey({ armoredKey: armored })
+
+        await verifySig(message, publicKey, signedText, keyId)
+      } catch (fetchErr) {
+        // Keyserver failed — prompt for manual key paste
+        setPendingMessage({ message, signedText, keyId })
+        setNeedsManualKey(true)
+        setStatus({
+          type: 'info',
+          msg: `Could not fetch key from keyserver (${fetchErr.message}). Paste your public key below to verify locally.`
+        })
+      }
+    } catch (err) {
+      setStatus({ type: 'err', msg: `Verification failed: ${err.message}` })
+    } finally {
+      setIsVerifying(false)
+    }
+  }, [pgpSig, address, verifySig])
+
+  // Manual key verification
+  const handleManualVerify = useCallback(async () => {
+    if (!manualPubKey.trim() || !pendingMessage) return
+
+    setIsVerifying(true)
+    setStatus({ type: 'info', msg: 'Verifying signature against your public key…' })
+
+    try {
+      const publicKey = await openpgp.readKey({ armoredKey: manualPubKey.trim() })
+      await verifySig(pendingMessage.message, publicKey, pendingMessage.signedText, pendingMessage.keyId)
+      setNeedsManualKey(false)
+    } catch (err) {
+      setStatus({ type: 'err', msg: `Verification failed: ${err.message}` })
+    } finally {
+      setIsVerifying(false)
+    }
+  }, [manualPubKey, pendingMessage, verifySig])
+
+  return (
+    <div className={`step ${active ? 'active' : ''} ${done ? 'done' : ''}`}>
+      <div className="step-header">
+        <span className={`step-num ${active ? 'active-num' : ''}`}>03 //</span>
+        <span className="step-title">Sign ETH Address with GPG</span>
+        {done && <span className="step-badge">✓ complete</span>}
+      </div>
+
+      {active && (
+        <div className="fade-in">
+          <p className="helper">
+            In your terminal, run this command to sign your Ethereum address with your GPG key:
+          </p>
+
+          <div className="command-block">
+            <span className="prompt">$ </span>
+            {command}
+          </div>
+          <button className="btn btn-sm" onClick={(e) => copyToClipboard(command, e)} style={{ marginTop: 8 }}>
+            copy command
+          </button>
+
+          <p className="helper" style={{ marginTop: 16 }}>
+            Then paste the entire output (including the <code>-----BEGIN PGP SIGNED MESSAGE-----</code> header) below:
+          </p>
+
+          <textarea
+            className="pgp-input"
+            placeholder={`-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA512\n\nI control the Ethereum address: 0x...\n-----BEGIN PGP SIGNATURE-----\n\n...\n-----END PGP SIGNATURE-----`}
+            value={pgpSig}
+            onChange={e => setPgpSig(e.target.value)}
+            spellCheck={false}
+          />
+
+          <div className="status info" style={{ marginTop: 16, marginBottom: 16 }}>
+            <strong>Upload your key to keys.openpgp.org</strong> — this lets Scry fetch your latest key data
+            (identity proofs, third-party signatures) even after publishing. Without it, only the key
+            snapshot from publish time is shown.
+            <div style={{ marginTop: 8 }}>
+              <a href="https://keys.openpgp.org/upload" target="_blank" rel="noopener noreferrer" style={{ color: 'inherit', textDecoration: 'underline' }}>
+                Upload via browser
+              </a>
+              <span style={{ margin: '0 8px' }}>or</span>
+              <code>gpg --export {expectedFingerprint || 'YOUR_FINGERPRINT'} | curl -T - https://keys.openpgp.org</code>
+            </div>
+          </div>
+
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={handleVerify} disabled={isVerifying || !pgpSig.trim()}>
+              {isVerifying ? 'Verifying…' : 'Verify PGP Signature'}
+            </button>
+          </div>
+
+          {status && <div className={`status ${status.type}`}>{status.msg}</div>}
+
+          {needsManualKey && (
+            <div className="fade-in" style={{ marginTop: 20 }}>
+              <p className="helper">
+                Export your public key with:
+              </p>
+              <div className="command-block">
+                <span className="prompt">$ </span>
+                {exportCommand}
+              </div>
+              <button className="btn btn-sm" onClick={(e) => copyToClipboard(exportCommand, e)} style={{ marginTop: 8 }}>
+                copy command
+              </button>
+
+              <p className="helper" style={{ marginTop: 16 }}>
+                Paste the full public key block below:
+              </p>
+              <textarea
+                className="pgp-input"
+                style={{ minHeight: 140 }}
+                placeholder={`-----BEGIN PGP PUBLIC KEY BLOCK-----\n\n...\n-----END PGP PUBLIC KEY BLOCK-----`}
+                value={manualPubKey}
+                onChange={e => setManualPubKey(e.target.value)}
+                spellCheck={false}
+              />
+              <div className="row" style={{ marginTop: 12 }}>
+                <button className="btn btn-primary" onClick={handleManualVerify} disabled={isVerifying || !manualPubKey.trim()}>
+                  {isVerifying ? 'Verifying…' : 'Verify with Public Key'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {done && !active && (
+        <div className="mono-box">
+          <div className="label">pgp signature verified</div>
+          <div className="value">✓</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Step 4: Generate Identity Claim ─────────────────────────────────────────
+
+function StepAttest({ active, done, attestation, onPublish }) {
+  const [copied, setCopied] = useState(false)
+  const [publishStatus, setPublishStatus] = useState(null)
+  const [txHash, setTxHash] = useState(null)
+
+  const { writeContractAsync } = useWriteContract()
+
+  if (!active && !done) return (
+    <div className={`step`}>
+      <div className="step-header">
+        <span className="step-num">04 //</span>
+        <span className="step-title">Generate & Publish Identity Claim</span>
+      </div>
+    </div>
+  )
+
+  const handleCopy = () => {
+    copyToClipboard(JSON.stringify(attestation, null, 2))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handlePublish = async () => {
+    try {
+      setPublishStatus({ type: 'info', msg: 'Sending transaction…' })
+
+      const hash = await writeContractAsync({
+        address: REGISTRY_ADDRESS,
+        abi: REGISTRY_ABI,
+        functionName: 'attest',
+        args: [attestation.gpgFingerprint, attestation.gpgSignature, attestation.gpgPublicKey],
+        chainId: mainnet.id,
+      })
+
+      setTxHash(hash)
+      setPublishStatus({ type: 'info', msg: `Waiting for confirmation… tx: ${hash.slice(0, 10)}…` })
+
+      const { createPublicClient, http } = await import('viem')
+      const rpcUrl = import.meta.env.VITE_ALCHEMY_RPC_URL
+      const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+      const receipt = await client.waitForTransactionReceipt({ hash, pollingInterval: 4_000 })
+
+      if (receipt.status === 'success') {
+        setPublishStatus({ type: 'ok', msg: `✓ Attested on-chain.` })
+        onPublish && onPublish()
+      } else {
+        setPublishStatus({ type: 'err', msg: `Transaction reverted. Tx: ${hash}` })
+      }
+    } catch (err) {
+      setPublishStatus({ type: 'err', msg: err.shortMessage || err.message })
+    }
+  }
+
+  const explorerUrl = attestation?.ethAddress
+    ? `/eth/${attestation.ethAddress}`
+    : null
+
+  return (
+    <div className={`step ${active && !done ? 'active' : ''} ${done ? 'done' : ''}`}>
+      <div className="step-header">
+        <span className={`step-num ${active && !done ? 'active-num' : ''}`}>04 //</span>
+        <span className="step-title">Generate & Publish Identity Claim</span>
+        {done && <span className="step-badge">✓ sealed</span>}
+      </div>
+
+      {done && attestation && (
+        <div className="fade-in">
+          <div className="status ok">
+            Identity claim sealed on-chain. Your ETH address and GPG key are now cryptographically linked.
+          </div>
+
+          <div style={{ marginTop: 16 }} className="row">
+            <a href={explorerUrl} className="btn btn-primary" target="_blank" rel="noopener noreferrer">
+              View in Scry
+            </a>
+            {txHash && (
+              <button className="btn btn-sm" onClick={(e) => { copyToClipboard(txHash, e); }}>
+                Copy Tx Hash
+              </button>
+            )}
+            <button className="btn btn-sm" onClick={handleCopy}>
+              {copied ? '✓ copied' : 'Copy JSON'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {active && !done && attestation && (
+        <div className="fade-in">
+          <p className="helper">
+            Both signatures are verified. This JSON is your identity claim — a cryptographic proof that your
+            ETH wallet and GPG key are controlled by the same person. Publish it on-chain to make it queryable.
+          </p>
+
+          <div className="attestation-output">
+            <div className="attestation-output-header">
+              <span>attestation.json</span>
+              <button className="btn btn-sm" onClick={handleCopy}>
+                {copied ? '✓ copied' : 'copy json'}
+              </button>
+            </div>
+            <pre>{JSON.stringify(attestation, null, 2)}</pre>
+          </div>
+
+          <hr className="divider" />
+
+          <p className="helper">
+            The contract stores the fingerprint↔address mapping on-chain. The PGP signature itself
+            lives in the event log — verifiable by anyone, forever.
+          </p>
+
+          <button className="btn btn-primary" onClick={handlePublish} disabled={publishStatus?.type === 'info'}>
+            {publishStatus?.type === 'info' ? 'Publishing…' : 'Publish to Registry'}
+          </button>
+
+          {publishStatus && <div className={`status ${publishStatus.type}`}>{publishStatus.msg}</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Your Identity Claims (with Revoke) ──────────────────────────────────────
+
+function formatDate(ts) {
+  if (!ts) return '—'
+  return new Date(ts * 1000).toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  })
+}
+
+function YourAttestations({ address }) {
+  const [revokeStatus, setRevokeStatus] = useState({})
+  const { writeContractAsync } = useWriteContract()
+
+
+  const { data: count, refetch: refetchCount } = useReadContract({
+    address: REGISTRY_ADDRESS,
+    abi: REGISTRY_ABI,
+    functionName: 'attestationCount',
+    args: [address],
+    chainId: mainnet.id,
+  })
+
+  const numCount = count !== undefined ? Number(count) : 0
+
+  const contracts = useMemo(() => {
+    if (!numCount) return []
+    return Array.from({ length: numCount }, (_, i) => ({
+      address: REGISTRY_ADDRESS,
+      abi: REGISTRY_ABI,
+      functionName: 'getAttestation',
+      args: [address, BigInt(i)],
+      chainId: mainnet.id,
+    }))
+  }, [address, numCount])
+
+  const { data: allAtt, refetch: refetchAtt } = useReadContracts({
+    contracts,
+    query: { enabled: contracts.length > 0 },
+  })
+
+  const attestations = useMemo(() => {
+    if (!allAtt) return []
+    return allAtt
+      .map((item, index) => {
+        if (item.status !== 'success') return null
+        const [fingerprint, createdAt, revoked] = item.result
+        return { index, fingerprint, createdAt: Number(createdAt), revoked }
+      })
+      .filter(Boolean)
+      .reverse()
+  }, [allAtt])
+
+  if (numCount === 0) return null
+
+  const handleRevoke = async (index) => {
+    try {
+      setRevokeStatus(s => ({ ...s, [index]: { type: 'info', msg: 'Sending revoke…' } }))
+
+      const hash = await writeContractAsync({
+        address: REGISTRY_ADDRESS,
+        abi: REGISTRY_ABI,
+        functionName: 'revoke',
+        args: [BigInt(index)],
+        chainId: mainnet.id,
+      })
+
+      setRevokeStatus(s => ({ ...s, [index]: { type: 'info', msg: `Waiting for confirmation…` } }))
+
+      const { createPublicClient, http } = await import('viem')
+      const rpcUrl = import.meta.env.VITE_ALCHEMY_RPC_URL
+      const client = createPublicClient({ chain: mainnet, transport: http(rpcUrl) })
+      await client.waitForTransactionReceipt({ hash, pollingInterval: 4_000 })
+
+      setRevokeStatus(s => ({ ...s, [index]: { type: 'ok', msg: 'Revoked.' } }))
+      refetchCount()
+      refetchAtt()
+    } catch (err) {
+      setRevokeStatus(s => ({ ...s, [index]: { type: 'err', msg: err.shortMessage || err.message } }))
+    }
+  }
+
+  const activeCount = attestations.filter(a => !a.revoked).length
+
+  return (
+    <div className="step active">
+      <div className="step-header">
+        <span className="step-num active-num">00 //</span>
+        <span className="step-title">Your Identity Claims</span>
+        <span className="step-badge">{activeCount} active</span>
+      </div>
+
+      <div className="attestation-table-wrap">
+        <table className="attestation-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fingerprint</th>
+              <th>Date</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {attestations.map(a => (
+              <tr key={a.index}>
+                <td className="att-index">{a.index}</td>
+                <td>
+                  <a href={`/pgp/${a.fingerprint.toUpperCase()}`} rel="noopener noreferrer" style={{ color: 'inherit' }}>
+                    {a.fingerprint.toUpperCase().slice(0, 8)}...{a.fingerprint.toUpperCase().slice(-8)}
+                  </a>
+                </td>
+                <td className="att-date">{formatDate(a.createdAt)}</td>
+                <td>
+                  <span className={`status-badge ${a.revoked ? 'revoked' : 'active'}`}>
+                    {a.revoked ? 'revoked' : 'active'}
+                  </span>
+                </td>
+                <td>
+                  {!a.revoked && (
+                    <button
+                      className="btn btn-sm"
+                      onClick={() => handleRevoke(a.index)}
+                      disabled={revokeStatus[a.index]?.type === 'info'}
+                    >
+                      {revokeStatus[a.index]?.type === 'info' ? 'Revoking…' : 'Revoke'}
+                    </button>
+                  )}
+                  {revokeStatus[a.index] && revokeStatus[a.index].type !== 'info' && (
+                    <span className={`status ${revokeStatus[a.index].type}`} style={{ marginLeft: 8, fontSize: '12px' }}>
+                      {revokeStatus[a.index].msg}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+// ─── Topbar ─────────────────────────────────────────────────────────────────
+
+function ThemeSelect({ storageKey }) {
+  const [theme, setTheme] = useState(
+    () => localStorage.getItem(storageKey) || 'thurin'
+  )
+
+  const handleChange = (e) => {
+    const id = e.target.value
+    setTheme(id)
+    document.documentElement.dataset.theme = id
+    localStorage.setItem(storageKey, id)
+  }
+
+  return (
+    <select className="theme-select" value={theme} onChange={handleChange}>
+      <option value="thurin">Thurin</option>
+      <option value="dark">Dark</option>
+      <option value="light">Light</option>
+    </select>
+  )
+}
+
+function Topbar() {
+  return (
+    <nav className="topbar">
+      <a href="/" className="topbar-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <svg viewBox="20 20 76 76" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+          <path d="M25 80 Q25 25 50 25 Q75 25 75 50" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
+          <path d="M33 75 Q33 35 50 35 Q67 35 67 52" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
+          <path d="M41 70 Q41 45 50 45 Q59 45 59 55" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
+          <path d="M50 65 L50 53" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
+          <rect x="63" y="72" width="22" height="18" rx="2" fill="none" stroke="#c9a227" strokeWidth="3"/>
+          <path d="M68 72 V66 Q68 58 74 58 Q80 58 80 66 V72" fill="none" stroke="#c9a227" strokeWidth="3" strokeLinecap="round"/>
+        </svg>
+        Signet
+      </a>
+      <ThemeSelect storageKey="thurin-signet-theme" />
+    </nav>
+  )
+}
+
+// ─── Root Signet component ─────────────────────────────────────────────────
+
+export default function Signet() {
+  const { address, isConnected } = useAccount()
+
+  // State flowing through the steps
+  const [ethData, setEthData]   = useState(null)   // { fingerprint, ethSig, message }
+  const [pgpData, setPgpData]   = useState(null)   // { pgpSig, signedText, keyId, fingerprint, armoredPublicKey, pgpMeta }
+  const [pgpSigText, setPgpSigText] = useState('') // textarea value
+  const [published, setPublished] = useState(false)
+
+  // Derive active step
+  const step = !isConnected ? 1
+    : !ethData ? 2
+    : !pgpData ? 3
+    : 4
+
+  // Build final attestation object
+  const attestation = ethData && pgpData ? {
+    version: '2',
+    timestamp: new Date().toISOString(),
+    ethAddress: address,
+    gpgFingerprint: ethData.fingerprint,
+    ethSignedMessage: ethData.message,
+    ethSignature: ethData.ethSig,
+    gpgSignedMessage: pgpData.signedText,
+    gpgSignature: pgpData.pgpSig,
+    gpgPublicKey: pgpData.armoredPublicKey,
+    gpgKeyId: pgpData.keyId,
+    gpgMeta: pgpData.pgpMeta,
+  } : null
+
+  return (
+    <div className="app">
+      <Topbar />
+
+      <div className="steps">
+          <StepConnect
+            active={step === 1}
+            done={step > 1}
+          />
+
+          {isConnected && <YourAttestations address={address} />}
+
+          <StepSignEth
+            active={step === 2}
+            done={step > 2}
+            address={address}
+            ethSig={ethData?.ethSig}
+            onSigned={data => setEthData(data)}
+          />
+
+          <StepSignGpg
+            active={step === 3}
+            done={step > 3}
+            address={address}
+            expectedFingerprint={ethData?.fingerprint}
+            pgpSig={pgpSigText}
+            setPgpSig={setPgpSigText}
+            onVerified={data => setPgpData(data)}
+          />
+
+          <StepAttest
+            active={step === 4}
+            done={published}
+            attestation={attestation}
+            onPublish={() => setPublished(true)}
+          />
+      </div>
+
+    </div>
+  )
+}

@@ -35,7 +35,7 @@ For unclaimed keys, the on-chain section would show a CTA: "Link this key to you
 
 ## ~~Key ID Shorthand~~ (Shipped)
 
-Implemented via Option 1 (keyserver resolve). Scry detects 16-char hex input, resolves the key ID to a full fingerprint via `keys.openpgp.org/vks/v1/by-keyid/`, and then proceeds with the standard lookup flow. URLs like `scry.thurin.id/#/pgp/CD3D0D7F0C9E5FB8` work.
+Implemented via Option 1 (keyserver resolve). Scry detects 16-char hex input, resolves the key ID to a full fingerprint via `keys.openpgp.org/vks/v1/by-keyid/`, and then proceeds with the standard lookup flow. URLs like `thurin.id/#/pgp/CD3D0D7F0C9E5FB8` work.
 
 ## WKD Integration (Related)
 

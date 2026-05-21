@@ -13,7 +13,7 @@ Verifying my Thurin identity
 
 openpgp4fpr:653909A2F0E37C106F5FAF546C8857E0D8E8F074
 
-https://scry.thurin.id
+https://thurin.id
 ```
 
 The cast can contain any additional text — Scry only looks for the `openpgp4fpr:` string.

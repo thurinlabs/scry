@@ -18,7 +18,7 @@ This is a Thurin identity proof.
 
 openpgp4fpr:653909A2F0E37C106F5FAF546C8857E0D8E8F074
 
-This gist links my GitHub account to my PGP key registered on Signet (https://signet.thurin.id).
+This gist links my GitHub account to my PGP key registered on Signet (https://thurin.id/signet).
 ```
 
 ### 2. Add the notation to your PGP key

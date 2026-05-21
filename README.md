@@ -9,7 +9,7 @@ A [Thurin Labs](https://thurin.id) project.
 Scry is Thurin's identity lookup tool. It reads from the `PGPRegistry` contract on Ethereum mainnet and verifies identity proofs linked to PGP keys.
 
 1. **Look up an identity** — enter an ETH address, ENS name, or PGP fingerprint
-2. **View on-chain claims** — see which PGP keys are attested to which addresses via [Signet](https://signet.thurin.id)
+2. **View on-chain claims** — see which PGP keys are attested to which addresses via [Signet](https://thurin.id/signet)
 3. **Verify proofs** — `proof@thurin.id` notations in PGP keys are checked against GitHub, DNS, and Farcaster
 
 ## Setup

@@ -8,6 +8,7 @@ import { REGISTRY_ADDRESS, REGISTRY_ABI, RPC_URL } from './wagmiConfig'
 import { identifyProof, verifyProof, displayUrl, proofHref, proofSecondaryHref } from './proofs'
 import { ScryCard, IdentityKitProvider } from '@thurinlabs/identity-kit'
 import '@thurinlabs/identity-kit/styles'
+import Signet from './components/Signet'
 
 async function parsePgpKey(armoredKey) {
   try {
@@ -156,7 +157,7 @@ function copyToClipboard(text, e) {
 // ─── Path routing ───────────────────────────────────────────────────────────
 
 function parseRoute() {
-  // Check for legacy hash routes — redirect to path on scry.thurin.id, keep hash elsewhere (IPFS/ENS)
+  // Check for legacy hash routes — redirect to path on thurin.id, keep hash elsewhere (IPFS/ENS)
   const hash = window.location.hash.replace(/^#\/?/, '')
   if (hash) {
     const slash = hash.indexOf('/')
@@ -164,7 +165,7 @@ function parseRoute() {
       const prefix = hash.slice(0, slash).toLowerCase()
       const value = decodeURIComponent(hash.slice(slash + 1))
       if (value && (prefix === 'eth' || prefix === 'pgp' || prefix === 'ens')) {
-        if (window.location.hostname === 'scry.thurin.id') {
+        if (window.location.hostname === 'thurin.id') {
           window.history.replaceState(null, '', `/${prefix}/${encodeURIComponent(value)}`)
         } else {
           // On IPFS/ENS, parse the hash route directly
@@ -194,7 +195,7 @@ function parseRoute() {
 
 function pushRoute(type, value) {
   const prefix = type === 'address' ? 'eth' : (type === 'fingerprint' || type === 'keyId') ? 'pgp' : 'ens'
-  if (window.location.hostname === 'scry.thurin.id') {
+  if (window.location.hostname === 'thurin.id') {
     const newPath = `/${prefix}/${encodeURIComponent(value)}`
     if (window.location.pathname !== newPath) {
       window.history.pushState(null, '', newPath)
@@ -247,7 +248,7 @@ function Topbar() {
         Scry
       </a>
       <div className="topbar-right">
-        <a href="https://signet.thurin.id" className="topbar-signet-link" target="_blank" rel="noopener noreferrer">
+        <a href="/signet" className="topbar-signet-link" target="_blank" rel="noopener noreferrer">
           Create identity claim
         </a>
         <ThemeSelect storageKey="thurin-scry-theme" />
@@ -608,7 +609,7 @@ function AddressDetail({ address, ensName, ensAvatar, attestations, count, isLoa
         <div className="status info" style={{ marginTop: 2 }}>
           No identity claims found for this address.
           <div style={{ marginTop: 8 }}>
-            <a href="https://signet.thurin.id" className="fingerprint-link" target="_blank" rel="noopener noreferrer">
+            <a href="/signet" className="fingerprint-link" target="_blank" rel="noopener noreferrer">
               Create an identity claim on Signet →
             </a>
           </div>
@@ -947,7 +948,7 @@ function FingerprintDetail({ fingerprint }) {
           <div className="status info" style={{ marginTop: 0 }}>
             No active claims found for this fingerprint.
             <div style={{ marginTop: 8 }}>
-              <a href="https://signet.thurin.id" className="fingerprint-link" target="_blank" rel="noopener noreferrer">
+              <a href="/signet" className="fingerprint-link" target="_blank" rel="noopener noreferrer">
                 Create an identity claim on Signet →
               </a>
             </div>
@@ -1255,7 +1256,7 @@ function Scry() {
         {!submitted && (
           <>
             <p className="helper" style={{ marginTop: 16, marginBottom: 0, textAlign: 'center' }}>
-              Don't have an identity claim yet? <a href="https://signet.thurin.id" target="_blank" rel="noopener noreferrer">Create one on Signet</a>.
+              Don't have an identity claim yet? <a href="/signet" target="_blank" rel="noopener noreferrer">Create one on Signet</a>.
             </p>
             <h2 className="homepage-headline">See the full picture behind any Ethereum identity.</h2>
             <div className="homepage-cards">
@@ -1315,7 +1316,7 @@ function Scry() {
               <div className="status info">
                 The PGPRegistry contract is not yet deployed. Once deployed to Sepolia, lookups will query on-chain data.
                 <div style={{ marginTop: 8 }}>
-                  <a href="https://signet.thurin.id" className="fingerprint-link" target="_blank" rel="noopener noreferrer">
+                  <a href="/signet" className="fingerprint-link" target="_blank" rel="noopener noreferrer">
                     Create an identity claim on Signet →
                   </a>
                 </div>
@@ -1383,20 +1384,22 @@ function Scry() {
 // ─── Root App ───────────────────────────────────────────────────────────────
 
 export default function App() {
+  const isSignet = typeof window !== 'undefined' && window.location.pathname.startsWith('/signet')
+
   return (
     <div className="app">
       <Topbar />
 
-      <Scry />
+      {isSignet ? <Signet /> : <Scry />}
 
       <footer className="footer">
         <span className="footer-version">scry v0.4.1</span>
         <div className="footer-columns">
           <div className="footer-col">
             <span className="footer-col-label">Home</span>
-            <a href="https://thurin.id" target="_blank" rel="noopener noreferrer">Thurin Labs</a>
-            <a href="https://signet.thurin.id" target="_blank" rel="noopener noreferrer">Signet</a>
-            <a href="https://thurin.id/privacy/" target="_blank" rel="noopener noreferrer">Privacy</a>
+            <a href="https://thurinlabs.id" target="_blank" rel="noopener noreferrer">Thurin Labs</a>
+            <a href="/signet">Signet</a>
+            <a href="https://thurinlabs.id/privacy/" target="_blank" rel="noopener noreferrer">Privacy</a>
           </div>
           <div className="footer-col">
             <span className="footer-col-label">Social</span>
