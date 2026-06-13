@@ -37,6 +37,10 @@ function gpgPayload(address) {
   return `I control the Ethereum address: ${address.toLowerCase()}`
 }
 
+// Must match PGPRegistry.MAX_PAYLOAD_BYTES (16 KB). The on-chain key only needs to
+// verify the attestation signature, so a minimal export stays well under this.
+const MAX_PUBKEY_BYTES = 16384
+
 // ─── Step 1: Connect Wallet ──────────────────────────────────────────────────
 
 function StepConnect({ active, done }) {
@@ -155,8 +159,8 @@ function StepSignGpg({ active, done, address, expectedFingerprint, onVerified, p
     : `echo "connect wallet first" | gpg --clearsign --armor`
 
   const exportCommand = expectedFingerprint
-    ? `gpg --armor --export ${expectedFingerprint}`
-    : `gpg --armor --export you@email.com`
+    ? `gpg --export-options export-minimal,no-export-attributes --armor --export ${expectedFingerprint}`
+    : `gpg --export-options export-minimal,no-export-attributes --armor --export you@email.com`
 
   // Verify signature against a public key (shared by both flows)
   const verifySig = useCallback(async (message, publicKey, signedText, keyId) => {
@@ -176,10 +180,24 @@ function StepSignGpg({ active, done, address, expectedFingerprint, onVerified, p
         type: 'err',
         msg: `Key mismatch: you signed with key ${fingerprint.slice(0, 8)}... but Step 2 fingerprint is ${expectedFingerprint.slice(0, 8)}... — sign with the correct key.`
       })
-      return
+      return false
     }
 
     const armoredPublicKey = publicKey.armor()
+
+    // The on-chain payload is capped (PGPRegistry.MAX_PAYLOAD_BYTES). A well-used key
+    // with many notations/self-sigs can exceed it — but the on-chain key only needs to
+    // verify the seal, so route the user to paste a minimal export instead of failing.
+    const pubKeyBytes = new TextEncoder().encode(armoredPublicKey).length
+    if (pubKeyBytes > MAX_PUBKEY_BYTES) {
+      setPendingMessage({ message, signedText, keyId })
+      setNeedsManualKey(true)
+      setStatus({
+        type: 'err',
+        msg: `Your public key is ${(pubKeyBytes / 1024).toFixed(1)} KB — over the ${MAX_PUBKEY_BYTES / 1024} KB on-chain limit. Paste a minimal export below (the export command now uses --export-minimal).`,
+      })
+      return false
+    }
 
     // Extract rich metadata from the key
     const primaryUser = await publicKey.getPrimaryUser()
@@ -208,6 +226,7 @@ function StepSignGpg({ active, done, address, expectedFingerprint, onVerified, p
         subkeys: subkeyCount,
       },
     })
+    return true
   }, [pgpSig, onVerified, expectedFingerprint])
 
   // Main verify: try keyserver first, fall back to manual paste
@@ -275,8 +294,8 @@ function StepSignGpg({ active, done, address, expectedFingerprint, onVerified, p
 
     try {
       const publicKey = await openpgp.readKey({ armoredKey: manualPubKey.trim() })
-      await verifySig(pendingMessage.message, publicKey, pendingMessage.signedText, pendingMessage.keyId)
-      setNeedsManualKey(false)
+      const ok = await verifySig(pendingMessage.message, publicKey, pendingMessage.signedText, pendingMessage.keyId)
+      if (ok) setNeedsManualKey(false)
     } catch (err) {
       setStatus({ type: 'err', msg: `Verification failed: ${err.message}` })
     } finally {
@@ -447,7 +466,7 @@ function StepAttest({ active, done, attestation, onPublish }) {
     : ''
 
   const shareUrl = attestation?.ethAddress
-    ? `https://twitter.com/intent/tweet?text=${encodeURIComponent('Prove more, reveal less. I just sealed my identity on Thurin:')}&url=${encodeURIComponent(`https://thurin.id/eth/${attestation.ethAddress}`)}`
+    ? `https://twitter.com/intent/tweet?text=${encodeURIComponent('Prove more, reveal less. I just sealed my identity on @thurinlabs 🔐')}&url=${encodeURIComponent(`https://thurin.id/eth/${attestation.ethAddress}`)}`
     : '#'
 
   return (
