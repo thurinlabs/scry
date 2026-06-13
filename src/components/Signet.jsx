@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { useAccount, useSignMessage, useWriteContract, useReadContract, useReadContracts } from 'wagmi'
+import { useAccount, useWriteContract, useReadContract, useReadContracts } from 'wagmi'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { mainnet } from 'wagmi/chains'
 import * as openpgp from 'openpgp'
@@ -32,11 +32,6 @@ function extractFingerprint(input) {
   return hex ? hex[0].toUpperCase() : null
 }
 
-// The message the wallet signs — must match exactly what you put in the GPG step
-function ethPayload(fingerprint) {
-  return `I control the GPG key with fingerprint: ${fingerprint.toUpperCase()}`
-}
-
 // The message GPG signs — must match exactly
 function gpgPayload(address) {
   return `I control the Ethereum address: ${address.toLowerCase()}`
@@ -64,46 +59,29 @@ function StepConnect({ active, done }) {
   )
 }
 
-// ─── Step 2: Sign Fingerprint with ETH Wallet ────────────────────────────────
+// ─── Step 2: Enter GPG Fingerprint ───────────────────────────────────────────
+// Note: no wallet signature here. ETH control is proven by msg.sender of the
+// publish tx in Step 4, which carries this fingerprint. We only need to capture it.
 
-function StepSignEth({ active, done, address, onSigned, ethSig }) {
+function StepSignEth({ active, done, onSigned, fingerprint: confirmedFp }) {
   const [fingerprint, setFingerprint] = useState('')
   const [status, setStatus] = useState(null)
-  const { signMessage, isPending } = useSignMessage()
-
 
   const detected = fingerprint.trim() ? extractFingerprint(fingerprint) : null
 
-  const handleSign = useCallback(() => {
+  const handleContinue = useCallback(() => {
     if (!detected) {
       setStatus({ type: 'err', msg: 'Could not find a 40-character fingerprint in your input.' })
       return
     }
-
-    const fp = detected
-
-    const message = ethPayload(fp)
-    setStatus({ type: 'info', msg: `Signing: "${message}"` })
-
-    signMessage(
-      { message },
-      {
-        onSuccess(sig) {
-          setStatus({ type: 'ok', msg: 'Signature obtained.' })
-          onSigned({ fingerprint: fp, ethSig: sig, message })
-        },
-        onError(err) {
-          setStatus({ type: 'err', msg: err.shortMessage || err.message })
-        },
-      }
-    )
-  }, [fingerprint, signMessage, onSigned])
+    onSigned({ fingerprint: detected })
+  }, [detected, onSigned])
 
   return (
     <div className={`step ${active ? 'active' : ''} ${done ? 'done' : ''}`}>
       <div className="step-header">
         <span className={`step-num ${active ? 'active-num' : ''}`}>02 //</span>
-        <span className="step-title">Sign Your GPG Fingerprint</span>
+        <span className="step-title">Enter Your GPG Fingerprint</span>
         {done && <span className="step-badge">✓ complete</span>}
       </div>
 
@@ -143,25 +121,18 @@ function StepSignEth({ active, done, address, onSigned, ethSig }) {
             </div>
           )}
 
-          <button className="btn btn-primary" onClick={handleSign} disabled={isPending || !detected}>
-            {isPending ? 'Check Wallet…' : 'Sign with Wallet'}
+          <button className="btn btn-primary" onClick={handleContinue} disabled={!detected}>
+            Use This Fingerprint
           </button>
 
           {status && <div className={`status ${status.type}`}>{status.msg}</div>}
-
-          {ethSig && (
-            <div className="mono-box fade-in" style={{ marginTop: 16 }}>
-              <div className="label">eth signature</div>
-              <div className="value" style={{ wordBreak: 'break-all' }}>{ethSig}</div>
-            </div>
-          )}
         </div>
       )}
 
       {done && !active && (
         <div className="mono-box">
-          <div className="label">eth signature (truncated)</div>
-          <div className="value">{ethSig?.slice(0, 40)}…</div>
+          <div className="label">gpg fingerprint</div>
+          <div className="value">{confirmedFp}</div>
         </div>
       )}
     </div>
@@ -471,6 +442,14 @@ function StepAttest({ active, done, attestation, onPublish }) {
     ? `/eth/${attestation.ethAddress}`
     : null
 
+  const embedSnippet = attestation?.ethAddress
+    ? `<div data-scry-card="${attestation.ethAddress}" data-theme="thurin"></div>\n<script src="https://cdn.jsdelivr.net/npm/@thurinlabs/identity-kit@0/dist/embed.global.js"></script>`
+    : ''
+
+  const shareUrl = attestation?.ethAddress
+    ? `https://twitter.com/intent/tweet?text=${encodeURIComponent('Prove more, reveal less. I just sealed my identity on Thurin:')}&url=${encodeURIComponent(`https://thurin.id/eth/${attestation.ethAddress}`)}`
+    : '#'
+
   return (
     <div className={`step ${active && !done ? 'active' : ''} ${done ? 'done' : ''}`}>
       <div className="step-header">
@@ -497,6 +476,26 @@ function StepAttest({ active, done, attestation, onPublish }) {
             <button className="btn btn-sm" onClick={handleCopy}>
               {copied ? '✓ copied' : 'Copy JSON'}
             </button>
+          </div>
+
+          <hr className="divider" />
+
+          <p className="helper">
+            <strong>Show it off.</strong> Drop your identity card on your site, blog, or GitHub README:
+          </p>
+          <div className="attestation-output">
+            <div className="attestation-output-header">
+              <span>embed</span>
+              <button className="btn btn-sm" onClick={(e) => copyToClipboard(embedSnippet, e)}>
+                copy
+              </button>
+            </div>
+            <pre>{embedSnippet}</pre>
+          </div>
+          <div className="row" style={{ marginTop: 12 }}>
+            <a className="btn btn-sm" href={shareUrl} target="_blank" rel="noopener noreferrer">
+              Share on X
+            </a>
           </div>
         </div>
       )}
@@ -726,7 +725,7 @@ export default function Signet() {
   const { address, isConnected } = useAccount()
 
   // State flowing through the steps
-  const [ethData, setEthData]   = useState(null)   // { fingerprint, ethSig, message }
+  const [ethData, setEthData]   = useState(null)   // { fingerprint }
   const [pgpData, setPgpData]   = useState(null)   // { pgpSig, signedText, keyId, fingerprint, armoredPublicKey, pgpMeta }
   const [pgpSigText, setPgpSigText] = useState('') // textarea value
   const [published, setPublished] = useState(false)
@@ -737,14 +736,13 @@ export default function Signet() {
     : !pgpData ? 3
     : 4
 
-  // Build final attestation object
+  // Build final attestation object. The ETH side of the claim is the publish tx
+  // itself (msg.sender + fingerprint), so no separate ETH signature is stored.
   const attestation = ethData && pgpData ? {
-    version: '2',
+    version: '3',
     timestamp: new Date().toISOString(),
     ethAddress: address,
     gpgFingerprint: ethData.fingerprint,
-    ethSignedMessage: ethData.message,
-    ethSignature: ethData.ethSig,
     gpgSignedMessage: pgpData.signedText,
     gpgSignature: pgpData.pgpSig,
     gpgPublicKey: pgpData.armoredPublicKey,
@@ -755,6 +753,21 @@ export default function Signet() {
   return (
     <div className="app">
       <Topbar />
+
+      <div className="signet-intro" style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px' }}>
+        <p className="helper">
+          <strong>Signet</strong> binds your Ethereum address and your PGP key (your encryption key)
+          into one verifiable identity — the two vouch for each other, anchored on-chain. Once sealed,
+          your address, PGP key, and social proofs resolve as a single identity on Scry, with a card
+          you can embed anywhere.
+        </p>
+        <p className="helper">To create a claim you'll need:</p>
+        <ul className="helper" style={{ margin: '8px 0 0 20px', lineHeight: 1.7 }}>
+          <li>an Ethereum wallet</li>
+          <li>a PGP key, with <code>gpg</code> in a terminal <em>(desktop only)</em></li>
+          <li>some ETH for gas</li>
+        </ul>
+      </div>
 
       <div className="steps">
           <StepConnect
@@ -767,8 +780,7 @@ export default function Signet() {
           <StepSignEth
             active={step === 2}
             done={step > 2}
-            address={address}
-            ethSig={ethData?.ethSig}
+            fingerprint={ethData?.fingerprint}
             onSigned={data => setEthData(data)}
           />
 
