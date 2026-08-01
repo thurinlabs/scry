@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { version } from '../package.json'
 import { useReadContract, useReadContracts, useEnsAddress, useEnsName, useEnsAvatar } from 'wagmi'
 import { createPublicClient, http, parseAbiItem, getAddress } from 'viem'
 import { mainnet } from 'wagmi/chains'
@@ -232,25 +233,47 @@ function ThemeSelect({ storageKey }) {
   )
 }
 
-function Topbar() {
+function Topbar({ isSignet }) {
   return (
     <nav className="topbar">
-      <a href="/" className="topbar-title" onClick={(e) => { e.preventDefault(); window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }}
-         style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <svg viewBox="20 20 76 76" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
-          <path d="M25 80 Q25 25 50 25 Q75 25 75 50" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
-          <path d="M33 75 Q33 35 50 35 Q67 35 67 52" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
-          <path d="M41 70 Q41 45 50 45 Q59 45 59 55" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
-          <path d="M50 65 L50 53" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
-          <circle cx="72" cy="72" r="12" fill="none" stroke="#c9a227" strokeWidth="3.5"/>
-          <line x1="81" y1="81" x2="92" y2="92" stroke="#c9a227" strokeWidth="3.5" strokeLinecap="round"/>
-        </svg>
-        Scry
-      </a>
-      <div className="topbar-right">
-        <a href="/signet" className="topbar-signet-link" target="_blank" rel="noopener noreferrer">
-          Create identity claim
+      {/* Cross-app links are plain hrefs: isSignet is read once on mount, so
+          switching apps needs a full page load, not a pushState. */}
+      {isSignet ? (
+        <a href="/signet" className="topbar-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <svg viewBox="20 20 76 76" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+            <path d="M25 80 Q25 25 50 25 Q75 25 75 50" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M33 75 Q33 35 50 35 Q67 35 67 52" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M41 70 Q41 45 50 45 Q59 45 59 55" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M50 65 L50 53" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
+            <rect x="63" y="72" width="22" height="18" rx="2" fill="none" stroke="#c9a227" strokeWidth="3"/>
+            <path d="M68 72 V66 Q68 58 74 58 Q80 58 80 66 V72" fill="none" stroke="#c9a227" strokeWidth="3" strokeLinecap="round"/>
+          </svg>
+          Signet
         </a>
+      ) : (
+        <a href="/" className="topbar-title" onClick={(e) => { e.preventDefault(); window.history.pushState(null, '', '/'); window.dispatchEvent(new PopStateEvent('popstate')); }}
+           style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <svg viewBox="20 20 76 76" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
+            <path d="M25 80 Q25 25 50 25 Q75 25 75 50" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M33 75 Q33 35 50 35 Q67 35 67 52" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M41 70 Q41 45 50 45 Q59 45 59 55" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
+            <path d="M50 65 L50 53" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
+            <circle cx="72" cy="72" r="12" fill="none" stroke="#c9a227" strokeWidth="3.5"/>
+            <line x1="81" y1="81" x2="92" y2="92" stroke="#c9a227" strokeWidth="3.5" strokeLinecap="round"/>
+          </svg>
+          Scry
+        </a>
+      )}
+      <div className="topbar-right">
+        {isSignet ? (
+          <a href="/" className="topbar-signet-link">
+            Look up an identity
+          </a>
+        ) : (
+          <a href="/signet" className="topbar-signet-link" target="_blank" rel="noopener noreferrer">
+            Create identity claim
+          </a>
+        )}
         <ThemeSelect storageKey="thurin-scry-theme" />
       </div>
     </nav>
@@ -1386,14 +1409,18 @@ function Scry() {
 export default function App() {
   const isSignet = typeof window !== 'undefined' && window.location.pathname.startsWith('/signet')
 
+  useEffect(() => {
+    if (isSignet) document.title = 'Signet — Thurin Identity Forge'
+  }, [isSignet])
+
   return (
     <div className="app">
-      <Topbar />
+      <Topbar isSignet={isSignet} />
 
       {isSignet ? <Signet /> : <Scry />}
 
       <footer className="footer">
-        <span className="footer-version">scry v0.4.1</span>
+        <span className="footer-version">{isSignet ? 'signet' : 'scry'} v{version}</span>
         <div className="footer-columns">
           <div className="footer-col">
             <span className="footer-col-label">Home</span>
@@ -1409,8 +1436,8 @@ export default function App() {
           </div>
           <div className="footer-col">
             <span className="footer-col-label">Dev</span>
-            <a href="https://codeberg.org/thurinlabs" target="_blank" rel="noopener noreferrer">Codeberg</a>
             <a href="https://github.com/thurinlabs" target="_blank" rel="noopener noreferrer">GitHub</a>
+            <a href="https://codeberg.org/thurinlabs" target="_blank" rel="noopener noreferrer">Codeberg</a>
             <a href="https://docs.thurin.id" target="_blank" rel="noopener noreferrer">Docs</a>
           </div>
         </div>

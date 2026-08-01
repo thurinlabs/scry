@@ -696,48 +696,6 @@ function YourAttestations({ address }) {
   )
 }
 
-// ─── Topbar ─────────────────────────────────────────────────────────────────
-
-function ThemeSelect({ storageKey }) {
-  const [theme, setTheme] = useState(
-    () => localStorage.getItem(storageKey) || 'thurin'
-  )
-
-  const handleChange = (e) => {
-    const id = e.target.value
-    setTheme(id)
-    document.documentElement.dataset.theme = id
-    localStorage.setItem(storageKey, id)
-  }
-
-  return (
-    <select className="theme-select" value={theme} onChange={handleChange}>
-      <option value="thurin">Thurin</option>
-      <option value="dark">Dark</option>
-      <option value="light">Light</option>
-    </select>
-  )
-}
-
-function Topbar() {
-  return (
-    <nav className="topbar">
-      <a href="/" className="topbar-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <svg viewBox="20 20 76 76" xmlns="http://www.w3.org/2000/svg" width="36" height="36">
-          <path d="M25 80 Q25 25 50 25 Q75 25 75 50" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
-          <path d="M33 75 Q33 35 50 35 Q67 35 67 52" fill="none" stroke="#7c9a3e" strokeWidth="4" strokeLinecap="round"/>
-          <path d="M41 70 Q41 45 50 45 Q59 45 59 55" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
-          <path d="M50 65 L50 53" fill="none" stroke="#c9a227" strokeWidth="4" strokeLinecap="round"/>
-          <rect x="63" y="72" width="22" height="18" rx="2" fill="none" stroke="#c9a227" strokeWidth="3"/>
-          <path d="M68 72 V66 Q68 58 74 58 Q80 58 80 66 V72" fill="none" stroke="#c9a227" strokeWidth="3" strokeLinecap="round"/>
-        </svg>
-        Signet
-      </a>
-      <ThemeSelect storageKey="thurin-signet-theme" />
-    </nav>
-  )
-}
-
 // ─── Root Signet component ─────────────────────────────────────────────────
 
 export default function Signet() {
@@ -770,9 +728,7 @@ export default function Signet() {
   } : null
 
   return (
-    <div className="app">
-      <Topbar />
-
+    <>
       <div className="signet-intro" style={{ maxWidth: 640, margin: '0 auto', padding: '0 16px' }}>
         <p className="helper">
           <strong>Signet</strong> binds your Ethereum address and your PGP key (your encryption key)
@@ -781,7 +737,7 @@ export default function Signet() {
           you can embed anywhere.
         </p>
         <p className="helper">To create a claim you'll need:</p>
-        <ul className="helper" style={{ margin: '8px 0 0 20px', lineHeight: 1.7 }}>
+        <ul className="helper" style={{ margin: '8px 0 24px 20px', lineHeight: 1.7 }}>
           <li>an Ethereum wallet</li>
           <li>a PGP key, with <code>gpg</code> in a terminal <em>(desktop only)</em></li>
           <li>some ETH for gas</li>
@@ -820,7 +776,6 @@ export default function Signet() {
             onPublish={() => setPublished(true)}
           />
       </div>
-
-    </div>
+    </>
   )
 }
