@@ -4,97 +4,22 @@ import { useReadContract, useReadContracts, useEnsAddress, useEnsName, useEnsAva
 import { createPublicClient, http, parseAbiItem, getAddress } from 'viem'
 import { mainnet } from 'wagmi/chains'
 import { normalize } from 'viem/ens'
-import { readKey, readCleartextMessage, verify } from 'openpgp'
+import { readKey } from 'openpgp'
 import { REGISTRY_ADDRESS, REGISTRY_ABI, RPC_URL } from './wagmiConfig'
-import { identifyProof, verifyProof, displayUrl, proofHref, proofSecondaryHref } from './proofs'
-import { ScryCard, IdentityKitProvider } from '@thurinlabs/identity-kit'
+import {
+  ScryCard,
+  IdentityKitProvider,
+  identifyProof,
+  verifyProof,
+  displayUrl,
+  proofHref,
+  proofSecondaryHref,
+  parsePgpKey,
+  verifyAttestation,
+  fetchEFPGraph,
+} from '@thurinlabs/identity-kit'
 import '@thurinlabs/identity-kit/styles'
 import Signet from './components/Signet'
-
-async function parsePgpKey(armoredKey) {
-  try {
-    const key = await readKey({ armoredKey })
-    const fingerprint = key.getFingerprint().toUpperCase()
-    const userIDs = key.users.map(u => u.userID?.userID).filter(Boolean)
-    const algorithm = key.keyPacket.algorithm
-    const created = key.keyPacket.created?.toISOString() ?? null
-    const expiration = await key.getExpirationTime()
-    const expires = expiration && expiration !== Infinity
-      ? new Date(expiration).toISOString() : null
-
-    // Extract notations (keyoxide proofs, etc.)
-    const notations = []
-    const seen = new Set()
-    for (const user of key.users) {
-      if (!user.selfCertifications) continue
-      for (const cert of user.selfCertifications) {
-        if (cert.rawNotations) {
-          for (const n of cert.rawNotations) {
-            const name = typeof n.name === 'string' ? n.name : new TextDecoder().decode(n.name)
-            const value = n.value instanceof Uint8Array
-              ? new TextDecoder().decode(n.value)
-              : typeof n.value === 'string' ? n.value : null
-            if (value) {
-              const key = `${name}:${value}`
-              if (!seen.has(key)) {
-                seen.add(key)
-                notations.push({ name, value })
-              }
-            }
-          }
-        }
-      }
-    }
-
-    const subkeys = key.subkeys.map(sk => ({
-      algorithm: sk.keyPacket.algorithm,
-      created: sk.keyPacket.created?.toISOString() ?? null,
-      fingerprint: sk.getFingerprint().toUpperCase(),
-    }))
-
-    return { fingerprint, userIDs, algorithm, created, expires, notations, subkeys }
-  } catch {
-    return null
-  }
-}
-
-/**
- * Verify an attestation's PGP proofs:
- * 1. Public key fingerprint matches claimed fingerprint
- * 2. PGP signature is valid against the public key
- * 3. Signed message contains the ETH address
- *
- * Returns { verified: true } or { verified: false, reason: string }
- */
-async function verifyAttestation({ pgpPublicKey, pgpSignature, fingerprint, ethAddress }) {
-  try {
-    if (!pgpPublicKey || !pgpSignature) {
-      return { verified: false, reason: 'Missing PGP data' }
-    }
-
-    // 1. Parse public key and check fingerprint
-    const publicKey = await readKey({ armoredKey: pgpPublicKey })
-    const keyFingerprint = publicKey.getFingerprint().toUpperCase()
-    if (keyFingerprint !== fingerprint.toUpperCase()) {
-      return { verified: false, reason: 'Key fingerprint mismatch' }
-    }
-
-    // 2. Parse and verify the PGP signature
-    const message = await readCleartextMessage({ cleartextMessage: pgpSignature })
-    const { signatures } = await verify({ message, verificationKeys: publicKey })
-    await signatures[0].verified // throws if invalid
-
-    // 3. Check the signed message contains the ETH address
-    const signedText = message.getText()
-    if (!signedText.toLowerCase().includes(ethAddress.toLowerCase())) {
-      return { verified: false, reason: 'Signed message does not contain ETH address' }
-    }
-
-    return { verified: true }
-  } catch {
-    return { verified: false, reason: 'Signature verification failed' }
-  }
-}
 
 const mainnetClient = createPublicClient({
   chain: mainnet,
@@ -335,7 +260,7 @@ function PgpKeyInfo({ armoredKey }) {
 
     Promise.all(
       proofs.map(p =>
-        verifyProof(p, keyInfo.fingerprint).then(result => ({ index: p.index, result }))
+        verifyProof(p, keyInfo.fingerprint, import.meta.env.VITE_NEYNAR_API_KEY).then(result => ({ index: p.index, result }))
       )
     ).then(results => {
       if (cancelled) return
@@ -644,57 +569,26 @@ function AddressDetail({ address, ensName, ensAvatar, attestations, count, isLoa
 
 // ─── EFP (Ethereum Follow Protocol) ─────────────────────────────────────────
 
-const EFP_API = 'https://api.ethfollow.xyz/api/v1'
-
 function EfpSection({ address }) {
-  const [followers, setFollowers] = useState(0)
-  const [followingList, setFollowingList] = useState([])
-  const [top8, setTop8] = useState([])
+  const [graph, setGraph] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
-  const [hasEfp, setHasEfp] = useState(false)
 
   useEffect(() => {
     if (!address) return
     let cancelled = false
     setIsLoading(true)
+    setGraph(null)
 
-    async function load() {
-      try {
-        // Get primary list ID
-        const listsResp = await fetch(`${EFP_API}/users/${address}/lists`)
-        if (!listsResp.ok) { setIsLoading(false); return }
-        const listsData = await listsResp.json()
-        const listId = listsData.primary_list
-        if (!listId) { setIsLoading(false); return }
-        if (cancelled) return
+    fetchEFPGraph(address).then(result => {
+      if (cancelled) return
+      setGraph(result)
+      setIsLoading(false)
+    })
 
-        setHasEfp(true)
-
-        // Fetch following and top8 via list ID, followers via stats endpoint
-        const [followingResp, statsResp, top8Resp] = await Promise.all([
-          fetch(`${EFP_API}/lists/${listId}/following?limit=100`),
-          fetch(`${EFP_API}/users/${address}/stats`),
-          fetch(`${EFP_API}/lists/${listId}/following?limit=8&tags=top8`),
-        ])
-
-        if (cancelled) return
-
-        const followingData = followingResp.ok ? await followingResp.json() : { following: [] }
-        const statsData = statsResp.ok ? await statsResp.json() : {}
-        const top8Data = top8Resp.ok ? await top8Resp.json() : { following: [] }
-
-        setFollowingList(followingData.following || [])
-        setFollowers(parseInt(statsData.followers_count) || 0)
-        setTop8(top8Data.following || [])
-      } catch {
-        // silently fail — EFP is supplementary
-      }
-      if (!cancelled) setIsLoading(false)
-    }
-
-    load()
     return () => { cancelled = true }
   }, [address])
+
+  const hasEfp = !!graph
 
   if (!isLoading && !hasEfp) return null
   if (isLoading) return (
@@ -706,8 +600,6 @@ function EfpSection({ address }) {
     </div>
   )
 
-  const followingCount = followingList.length
-
   return (
     <div className="detail-history">
       <div className="detail-label">
@@ -717,22 +609,22 @@ function EfpSection({ address }) {
         </span>
       </div>
       <div className="mono-box" style={{ marginBottom: 2 }}>
-        <div className="summary-grid" style={{ marginBottom: top8.length > 0 ? 12 : 0 }}>
+        <div className="summary-grid" style={{ marginBottom: graph.top8.length > 0 ? 12 : 0 }}>
           <div className="summary-item">
-            <span className="summary-value">{followers}</span>
+            <span className="summary-value">{graph.followers}</span>
             <span className="summary-key">Followers</span>
           </div>
           <div className="summary-item">
-            <span className="summary-value">{followingCount}</span>
+            <span className="summary-value">{graph.following}</span>
             <span className="summary-key">Following</span>
           </div>
         </div>
-        {top8.length > 0 && (
+        {graph.top8.length > 0 && (
           <>
             <div className="label">Top 8</div>
             <div className="efp-top8">
-              {top8.map((f, i) => (
-                <EfpFollowItem key={i} address={f.data} />
+              {graph.top8.map((addr, i) => (
+                <EfpFollowItem key={i} address={addr} />
               ))}
             </div>
           </>

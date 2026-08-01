@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# scry depends on @thurinlabs/identity-kit via `file:../identity-kit`, so CI
+# checks out identity-kit as a sibling and builds it before building scry.
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout scry
+        uses: actions/checkout@v4
+        with:
+          path: scry
+      - name: Checkout identity-kit (local dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: thurinlabs/identity-kit
+          path: identity-kit
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build identity-kit
+        working-directory: identity-kit
+        run: npm ci && npm run build
+      - name: Build scry
+        working-directory: scry
+        run: npm install && npm run build
