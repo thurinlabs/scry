@@ -1211,7 +1211,10 @@ function Scry() {
             </p>
             <h2 className="homepage-headline">See the full picture behind any Ethereum identity.</h2>
             <div className="homepage-cards">
-              <IdentityKitProvider neynarApiKey={import.meta.env.VITE_NEYNAR_API_KEY}>
+              <IdentityKitProvider
+                rpcUrl={import.meta.env.VITE_ALCHEMY_RPC_URL}
+                neynarApiKey={import.meta.env.VITE_NEYNAR_API_KEY}
+              >
                 <ScryCard ens="vitalik.eth" theme={cardTheme} />
                 <ScryCard ens="bendoubleu.eth" theme={cardTheme} />
               </IdentityKitProvider>
