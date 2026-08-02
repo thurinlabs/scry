@@ -491,8 +491,33 @@ function AddressDetail({ address, ensName, ensAvatar, attestations, count, isLoa
         )}
       </div>
 
-      {latest && latest.pgpPublicKey ? (
+      {/* The identity panel only renders for a verified, non-revoked claim. A
+          claim's stored public key is not authoritative until its signature
+          verifies and binds the key to this address, so unverified or revoked
+          key data is never used to display an identity. */}
+      {latest && latest.pgpPublicKey && latest.verification?.verified && !latest.revoked ? (
         <PgpKeyInfo armoredKey={latest.pgpPublicKey} />
+      ) : latest && latest.pgpPublicKey && latest.verification === null ? (
+        <div className="detail-history">
+          <div className="mono-box" style={{ marginBottom: 2 }}>
+            <div className="label">Identity Proofs</div>
+            <div className="value" style={{ color: 'var(--color-text-muted)' }}>Verifying signature…</div>
+          </div>
+        </div>
+      ) : latest && latest.pgpPublicKey ? (
+        <div className="detail-history">
+          <div className="mono-box" style={{ marginBottom: 2 }}>
+            <div className="label">Identity Proofs</div>
+            <div className="value" style={{ color: 'var(--color-text-muted)' }}>
+              {latest.revoked
+                ? 'This claim has been revoked — key data not shown.'
+                : 'Signature not verified — key data not shown.'}
+            </div>
+            <div className="proof-docs-footer">
+              <a href="https://docs.thurin.id/#/scry/proofs" target="_blank" rel="noopener noreferrer">how proofs work</a>
+            </div>
+          </div>
+        </div>
       ) : attestations.length > 0 && (
         <div className="detail-history">
           <div className="mono-box" style={{ marginBottom: 2 }}>
@@ -779,15 +804,22 @@ function FingerprintDetail({ fingerprint }) {
     return () => { cancelled = true }
   }, [claims])
 
-  // Find the first verified, non-revoked claim for PGP key display
+  // Only a verified, non-revoked claim may drive the identity panel — there is
+  // deliberately no fallback to unverified claims, since a claim's stored key
+  // is not authoritative until its signature verifies and binds it to the
+  // address.
   const bestClaim = useMemo(() => {
     for (const claim of claims) {
       const key = `${claim.address}-${claim.index}`
       if (!claim.revoked && verifications[key]?.verified) return claim
     }
-    // Fall back to first non-revoked claim
-    return claims.find(c => !c.revoked) || null
+    return null
   }, [claims, verifications])
+
+  // Distinguishes "still verifying" from "verified, nothing passed" so a
+  // legitimate identity is never briefly quarantined while checks are in flight.
+  const verificationsReady = claims.length > 0 &&
+    claims.every(c => verifications[`${c.address}-${c.index}`] !== undefined)
 
   if (isLoading) {
     return <div className="status info" style={{ marginTop: 24 }}>Querying registry...</div>
@@ -877,9 +909,13 @@ function FingerprintDetail({ fingerprint }) {
         <div className="detail-history">
           <div className="mono-box" style={{ marginBottom: 2 }}>
             <div className="label">Identity Proofs</div>
-            <div className="value" style={{ color: 'var(--color-text-muted)' }}>No proofs found</div>
+            <div className="value" style={{ color: 'var(--color-text-muted)' }}>
+              {!verificationsReady
+                ? 'Verifying signatures…'
+                : 'No verified claim for this fingerprint — key data not shown.'}
+            </div>
             <div className="proof-docs-footer">
-              <a href="https://docs.thurin.id/#/scry/proofs" target="_blank" rel="noopener noreferrer">how to add proofs</a>
+              <a href="https://docs.thurin.id/#/scry/proofs" target="_blank" rel="noopener noreferrer">how proofs work</a>
             </div>
           </div>
         </div>
